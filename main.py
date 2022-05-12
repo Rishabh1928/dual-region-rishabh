@@ -6,7 +6,7 @@ import logging as log
 import google.cloud.logging as logging
 from google.cloud import storage
 from helper import get_bucket_labels, get_object_ctime, get_object_mtime, get_object_size, get_object_crc32, \
-    get_object_metadata, set_object_metadata, get_object_acl
+    get_object_metadata, set_object_metadata, get_object_acl_source, check_and_set_acl_to_dest, set_acl_to_dest
 
 
 app = Flask(__name__)
@@ -27,26 +27,20 @@ def create():
     log.info(complete_data)
 
     # Extract relevant data
-    method_name = data["protoPayload"]["methodName"]
-    resource_name = data["protoPayload"]["resourceName"]
-    location = data["resource"]["labels"]["location"]  # asia-south1 (Mumbai), asia-south2 (Delhi)
-    source_bucket_name = data["resource"]["labels"]["bucket_name"]
+    source_bucket_name = data["message"]["attributes"]["bucketId"]
+    object_name = data["message"]["attributes"]["objectId"]
 
     # Relevant data combined
-    relevant_data = f"Method-Name: {method_name} ,Resource-Name: {resource_name}, " \
-                    f"Location: {location}, Bucket-Name: {source_bucket_name} "
+    relevant_data = f"Bucket-Name: {source_bucket_name}, Object-Name: {object_name}"
     log.info(relevant_data)
 
     # Derived fields
     gs_source_bucket = f"gs://{source_bucket_name}"
 
     # Check if a folder is created or an object
-    if resource_name.split("/objects/")[-1][-1] == "/":
+    if object_name[-1] == "/":
         log.info("Folder created, event skipped..")
         return "OK", 200
-    else:
-        object_name = resource_name.split("/objects/")[-1]  # this can be a single object name (abc.png) or sort of (
-        # DP800/test_fk/rishabh/Allahabad.txt)
 
     gs_source_object_url = f"{gs_source_bucket}/{object_name}"
 
@@ -141,11 +135,22 @@ def create():
                     post_copy_mtime_source = get_object_mtime(source_bucket_name, object_name)
 
                     if pre_copy_mtime_source != post_copy_mtime_source:
+                        # update meta
                         meta_source = get_object_metadata(source_bucket_name, object_name)
-                        set_object_metadata(dest_bucket_name, object_name, metadata=meta_source)
-                        log.info("The metadata for the destination object is set")
+                        try:
+                            set_object_metadata(dest_bucket_name, object_name, metadata=meta_source)
+                            log.info("Source metadata successfully set to destination..")
+                        except Exception as e:
+                            log.info(e)
 
                         # update acl
+                        source_acl_list = get_object_acl_source(source_bucket_name, object_name)
+                        try:
+                            set_acl_to_dest(dest_bucket_name, object_name, source_acl_list)
+                            log.info("Source ACL successfully set to destination..")
+                        except Exception as e:
+                            log.info(e)
+
                         return "OK", 200
 
                     else:
@@ -168,32 +173,27 @@ def create():
             if meta_source != meta_dest:  # order of keys doesn't matter
                 try:
                     set_object_metadata(dest_bucket_name, object_name, metadata=meta_source)
-                    log.info("The metadata for the destination object is set")
-                    return "OK", 200
+                    log.info("Source metadata is set to destination..")
                 except Exception as e:
                     log.info(e)
-                    return "Not able to set metadata to destination", 400
             else:
-                log.info("Meta is same for both source & destination")
+                log.info("Metadata is same for both source & destination..")
 
             # Get & check source & destination acl
 
-            acl_source = get_object_acl(source_bucket_name, object_name)
-            acl_dest = get_object_acl(dest_bucket_name, object_name)
+            source_acl_list = get_object_acl_source(source_bucket_name, object_name)
+            check_set_acl = check_and_set_acl_to_dest(dest_bucket_name, object_name, source_acl_list)
 
-            if acl_source != acl_dest:
-                try:
-                    # call set function here
-                    log.info("Source ACL set to destination ACL")
-                    return "OK", 200
-                except Exception as e:
-                    log.info(e)
-                    return "Not able to set acl to destination", 400
+            if check_set_acl:  # true - source acl is not equal to dest & source acl is set to dest
+                log.info("Source ACL is set to destination..")
             else:
-                log.info("ACL is same for both source & destination")
-                return "OK", 200
-            
-            
+                log.info("ACL is same for both source & destination..")
+
+            return "OK", 200
+        
+        
+        
+        
             
 @app.route("/update", methods=['POST'])
 def update():
