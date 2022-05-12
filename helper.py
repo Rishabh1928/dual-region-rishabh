@@ -185,16 +185,45 @@ def set_object_metadata(bucket_name, blob_name, metadata: dict):
     blob.patch()
 
 
-def get_object_acl(bucket_name, blob_name):
+def get_object_acl_source(source_bucket_name, blob_name):
     """Prints out a blob's access control list."""
 
     storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
+    bucket = storage_client.bucket(source_bucket_name)
     blob = bucket.blob(blob_name)
-    acl_list = []
+    object_acl_source = blob.acl
+    source_acl_list = []
 
-    for entry in blob.acl:
-        acl_list.append(entry)
-        # print("{}: {}".format(entry["role"], entry["entity"]))
+    for entry in object_acl_source:
+        source_acl_list.append(entry)
 
-    return acl_list
+    return source_acl_list
+
+
+def check_and_set_acl_to_dest(dest_bucket_name, blob_name, source_acl_list):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(dest_bucket_name)
+    blob = bucket.blob(blob_name)
+    object_acl_dest = blob.acl
+    dest_acl_list = []
+
+    for entry in object_acl_dest:
+        dest_acl_list.append(entry)
+
+    if source_acl_list != dest_acl_list:
+        object_acl_dest.save(acl=source_acl_list)  # saves the source acl to destination
+        return True
+    else:
+        return False
+
+
+def set_acl_to_dest(dest_bucket_name, blob_name, source_acl_list):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(dest_bucket_name)
+    blob = bucket.blob(blob_name)
+    object_acl = blob.acl
+    object_acl.save(acl=source_acl_list)
+
+
+
+
