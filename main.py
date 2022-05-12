@@ -93,11 +93,22 @@ def create():
             post_copy_mtime_source = get_object_mtime(source_bucket_name, object_name)
 
             if pre_copy_mtime_source != post_copy_mtime_source:
+                # update meta
                 meta_source = get_object_metadata(source_bucket_name, object_name)
-                set_object_metadata(dest_bucket_name, object_name, metadata=meta_source)
-                log.info("The metadata for the destination object is set")
+                try:
+                    set_object_metadata(dest_bucket_name, object_name, metadata=meta_source)
+                    log.info("Source metadata successfully set to destination..")
+                except Exception as e:
+                    log.info(e)
 
                 # update acl
+                source_acl_list = get_object_acl_source(source_bucket_name, object_name)
+                try:
+                    set_acl_to_dest(dest_bucket_name, object_name, source_acl_list)
+                    log.info("Source ACL successfully set to destination..")
+                except Exception as e:
+                    log.info(e)
+
                 return "OK", 200
 
             else:
@@ -189,8 +200,7 @@ def create():
             else:
                 log.info("ACL is same for both source & destination..")
 
-            return "OK", 200
-        
+            return "OK", 200        
         
         
         
